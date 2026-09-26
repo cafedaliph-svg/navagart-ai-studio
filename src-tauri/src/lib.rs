@@ -1,56 +1,19 @@
-use serde::Serialize;
-use std::{fs, path::PathBuf, process::{Command, Stdio}};
+use serde::{Deserialize,Serialize};
+use std::{fs,io::Write,path::{Path,PathBuf},process::{Command,Stdio}};
 
-#[derive(Serialize)]
-struct HardwareInfo { gpu: String, vram_mb: Option<u64>, nvidia: bool, recommended_profile: String }
-
-fn engine_dir() -> PathBuf {
-    std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(".")).join("NavagartAI").join("engine")
-}
-
-#[tauri::command]
-fn detect_hardware() -> HardwareInfo {
-    let output = Command::new("nvidia-smi").args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]).output();
-    if let Ok(out) = output {
-        if out.status.success() {
-            let text=String::from_utf8_lossy(&out.stdout); let line=text.lines().next().unwrap_or(""); let mut p=line.rsplitn(2, ',');
-            let vram=p.next().and_then(|x|x.trim().parse::<u64>().ok()); let gpu=p.next().unwrap_or("NVIDIA GPU").trim().to_string();
-            let profile=match vram.unwrap_or(0){0..=8191=>"image-only",8192..=15999=>"wan-low-vram",16000..=23999=>"wan-balanced",_=>"wan-quality"}.to_string();
-            return HardwareInfo{gpu,vram_mb:vram,nvidia:true,recommended_profile:profile};
-        }
-    }
-    HardwareInfo{gpu:"No NVIDIA GPU detected".into(),vram_mb:None,nvidia:false,recommended_profile:"image-only".into()}
-}
-
-#[tauri::command]
-fn engine_status() -> String {
-    if engine_dir().join("ComfyUI").exists() { "installed".into() } else { "not-installed".into() }
-}
-
-#[tauri::command]
-fn install_ai_engine() -> Result<String,String> {
-    let root=engine_dir(); fs::create_dir_all(&root).map_err(|e|e.to_string())?;
-    let comfy=root.join("ComfyUI");
-    if !comfy.exists() {
-        let status=Command::new("git").args(["clone","--depth","1","https://github.com/comfyanonymous/ComfyUI.git",comfy.to_string_lossy().as_ref()]).status().map_err(|_|"Git no está instalado o no se pudo ejecutar".to_string())?;
-        if !status.success(){return Err("No se pudo descargar ComfyUI".into())}
-    }
-    let venv=root.join("venv");
-    if !venv.exists(){let s=Command::new("python").args(["-m","venv",venv.to_string_lossy().as_ref()]).status().map_err(|_|"Python 3 no está instalado".to_string())?;if !s.success(){return Err("No se pudo crear el entorno Python".into())}}
-    let pip=venv.join("Scripts").join("pip.exe");
-    let req=comfy.join("requirements.txt");
-    let s=Command::new(pip).args(["install","-r",req.to_string_lossy().as_ref()]).status().map_err(|e|e.to_string())?;
-    if !s.success(){return Err("Falló la instalación de dependencias de ComfyUI".into())}
-    Ok(root.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-fn start_ai_engine() -> Result<String,String> {
-    let root=engine_dir(); let comfy=root.join("ComfyUI"); let python=root.join("venv").join("Scripts").join("python.exe");
-    if !python.exists(){return Err("Instala primero el motor IA".into())}
-    Command::new(python).current_dir(&comfy).args(["main.py","--listen","127.0.0.1","--port","8188"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e|e.to_string())?;
-    Ok("started".into())
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(){tauri::Builder::default().invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");}
+#[derive(Serialize)] struct HardwareInfo{gpu:String,vram_mb:Option<u64>,nvidia:bool,recommended_profile:String}
+#[derive(Serialize,Deserialize,Clone)] struct ModelSpec{id:String,name:String,kind:String,size_gb:f32,min_vram_gb:u32,url:String,filename:String,folder:String,license:String}
+#[derive(Serialize)] struct ModelState{spec:ModelSpec,installed:bool}
+fn root()->PathBuf{std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_|PathBuf::from(".")).join("NavagartAI").join("engine")}
+fn comfy()->PathBuf{root().join("ComfyUI")}
+fn runtime()->PathBuf{root().join("python")}
+fn catalog()->Vec<ModelSpec>{vec![ModelSpec{id:"sdxl-base".into(),name:"SDXL Base 1.0".into(),kind:"image".into(),size_gb:6.9,min_vram_gb:8,url:"https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors".into(),filename:"sd_xl_base_1.0.safetensors".into(),folder:"checkpoints".into(),license:"OpenRAIL++ / Stability AI model license - review before use".into()}]}
+#[tauri::command]fn detect_hardware()->HardwareInfo{if let Ok(o)=Command::new("nvidia-smi").args(["--query-gpu=name,memory.total","--format=csv,noheader,nounits"]).output(){if o.status.success(){let t=String::from_utf8_lossy(&o.stdout);let l=t.lines().next().unwrap_or("");let mut p=l.rsplitn(2,',');let v=p.next().and_then(|x|x.trim().parse::<u64>().ok());let g=p.next().unwrap_or("NVIDIA GPU").trim().to_string();let profile=match v.unwrap_or(0){0..=8191=>"image-only",8192..=15999=>"wan-low-vram",16000..=23999=>"wan-balanced",_=>"wan-quality"}.into();return HardwareInfo{gpu:g,vram_mb:v,nvidia:true,recommended_profile:profile}}}HardwareInfo{gpu:"No NVIDIA GPU detected".into(),vram_mb:None,nvidia:false,recommended_profile:"image-only".into()}}
+#[tauri::command]fn engine_status()->String{if comfy().exists(){"installed".into()}else{"not-installed".into()}}
+fn download(url:&str,dest:&Path)->Result<(),String>{if let Some(p)=dest.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?}let ps=format!("$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri '{}' -OutFile '{}'",url.replace("'","''"),dest.to_string_lossy().replace("'","''"));let s=Command::new("powershell").args(["-NoProfile","-Command",&ps]).status().map_err(|e|e.to_string())?;if s.success(){Ok(())}else{Err("Falló la descarga".into())}}
+fn bootstrap_python()->Result<PathBuf,String>{let r=runtime();let py=r.join("python.exe");if py.exists(){return Ok(py)}fs::create_dir_all(&r).map_err(|e|e.to_string())?;let zip=root().join("python.zip");download("https://www.python.org/ftp/python/3.13.15/python-3.13.15-embed-amd64.zip",&zip)?;let ps=format!("Expand-Archive -Force '{}' '{}'",zip.to_string_lossy(),r.to_string_lossy());let s=Command::new("powershell").args(["-NoProfile","-Command",&ps]).status().map_err(|e|e.to_string())?;if !s.success(){return Err("No se pudo extraer Python".into())}let pth=r.join("python313._pth");if pth.exists(){let mut txt=fs::read_to_string(&pth).map_err(|e|e.to_string())?;txt=txt.replace("#import site","import site");fs::write(&pth,txt).map_err(|e|e.to_string())?}let gp=root().join("get-pip.py");download("https://bootstrap.pypa.io/get-pip.py",&gp)?;let s=Command::new(&py).arg(&gp).status().map_err(|e|e.to_string())?;if !s.success(){return Err("No se pudo instalar pip".into())}Ok(py)}
+#[tauri::command]fn install_ai_engine()->Result<String,String>{fs::create_dir_all(root()).map_err(|e|e.to_string())?;let py=bootstrap_python()?;if !comfy().exists(){let zip=root().join("comfyui.zip");download("https://github.com/Comfy-Org/ComfyUI/archive/refs/heads/master.zip",&zip)?;let tmp=root().join("comfy-tmp");let ps=format!("Expand-Archive -Force '{}' '{}'",zip.to_string_lossy(),tmp.to_string_lossy());if !Command::new("powershell").args(["-NoProfile","-Command",&ps]).status().map_err(|e|e.to_string())?.success(){return Err("No se pudo extraer ComfyUI".into())}let extracted=tmp.join("ComfyUI-master");fs::rename(extracted,comfy()).map_err(|e|e.to_string())?;let _=fs::remove_dir_all(tmp)}let req=comfy().join("requirements.txt");let s=Command::new(&py).args(["-m","pip","install","-r",req.to_string_lossy().as_ref()]).status().map_err(|e|e.to_string())?;if !s.success(){return Err("Falló la instalación de dependencias".into())}Ok(root().to_string_lossy().to_string())}
+#[tauri::command]fn start_ai_engine()->Result<String,String>{let py=runtime().join("python.exe");if !py.exists(){return Err("Instala primero el motor IA".into())}Command::new(py).current_dir(comfy()).args(["main.py","--listen","127.0.0.1","--port","8188"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e|e.to_string())?;Ok("started".into())}
+#[tauri::command]fn list_models()->Vec<ModelState>{catalog().into_iter().map(|s|{let installed=comfy().join("models").join(&s.folder).join(&s.filename).exists();ModelState{spec:s,installed}}).collect()}
+#[tauri::command]fn install_model(id:String,accepted_license:bool)->Result<String,String>{if !accepted_license{return Err("Debes aceptar/revisar la licencia del modelo".into())}let s=catalog().into_iter().find(|m|m.id==id).ok_or("Modelo desconocido")?;let dest=comfy().join("models").join(&s.folder).join(&s.filename);download(&s.url,&dest)?;Ok(dest.to_string_lossy().to_string())}
+#[cfg_attr(mobile,tauri::mobile_entry_point)]pub fn run(){tauri::Builder::default().invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");}
