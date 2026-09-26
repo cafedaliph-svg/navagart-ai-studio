@@ -22,6 +22,26 @@ jobs:
         run: npm install
       - name: TypeScript and frontend build
         run: npm run build
+      - name: Generate required Tauri Windows icon
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/icons | Out-Null
+          Add-Type -AssemblyName System.Drawing
+          $bmp = New-Object System.Drawing.Bitmap 256,256
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.Clear([System.Drawing.Color]::FromArgb(20,20,28))
+          $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(108,92,231))
+          $g.FillRectangle($brush, 28, 28, 200, 200)
+          $font = New-Object System.Drawing.Font('Arial', 110, [System.Drawing.FontStyle]::Bold)
+          $white = [System.Drawing.Brushes]::White
+          $g.DrawString('N', $font, $white, 73, 58)
+          $hIcon = $bmp.GetHicon()
+          $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+          $stream = [System.IO.File]::Create('src-tauri/icons/icon.ico')
+          $icon.Save($stream)
+          $stream.Close()
+          $g.Dispose()
+          $bmp.Dispose()
       - name: Rust check
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Build Windows installers
