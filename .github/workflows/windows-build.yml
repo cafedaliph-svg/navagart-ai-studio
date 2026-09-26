@@ -2,7 +2,11 @@ name: Windows Build
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
+  pull_request:
+    branches: [main]
+
 jobs:
   build:
     permissions:
@@ -17,13 +21,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install frontend dependencies
         run: npm ci
+      - name: TypeScript and frontend build
+        run: npm run build
+      - name: Rust check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Build Windows installers
+        if: github.event_name != 'pull_request'
         run: npm run desktop:build
       - name: Upload installers
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: Navagart-AI-Studio-Windows
+          name: Navagart-AI-Studio-Windows-${{ github.sha }}
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+          retention-days: 14
