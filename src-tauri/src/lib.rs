@@ -150,7 +150,23 @@ async fn comfy_image(filename: String, subfolder: String, kind: String) -> Resul
     Ok(format!("data:{};base64,{}", mime, base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
+
+#[tauri::command]
+async fn comfy_upload(filename: String, data: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e|e.to_string())?;
+    if bytes.len() > 30_000_000 { return Err("La imagen supera 30 MB".into()); }
+    let clean: String = filename.chars().map(|c| if c.is_ascii_alphanumeric() || c=='.' || c=='-' || c=='_' {c} else {'_'}).collect();
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(clean).mime_str("application/octet-stream").map_err(|e|e.to_string())?;
+    let form = reqwest::multipart::Form::new().part("image",part).text("overwrite","true");
+    let response = reqwest::Client::new().post("http://127.0.0.1:8188/upload/image").multipart(form).send().await.map_err(|e|e.to_string())?;
+    let status = response.status();
+    let value: serde_json::Value = response.json().await.map_err(|e|e.to_string())?;
+    if !status.is_success() {return Err(format!("Error al subir imagen: {value}"));}
+    value.get("name").and_then(|v|v.as_str()).map(str::to_string).ok_or("ComfyUI no devolvió nombre".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().manage(DownloadManager::new()).invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model,control_download,remove_model,comfy_request,comfy_image]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");
+    tauri::Builder::default().manage(DownloadManager::new()).invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model,control_download,remove_model,comfy_request,comfy_image,comfy_upload]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");
 }
