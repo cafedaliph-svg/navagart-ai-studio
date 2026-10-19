@@ -114,7 +114,27 @@ fn remove_model(id:String) -> Result<String,String> {
     Ok("removed".into())
 }
 
+#[tauri::command]
+async fn comfy_request(path: String, method: String, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    if !path.starts_with('/') || path.starts_with("//") || path.contains("..") {
+        return Err("Ruta no permitida".into());
+    }
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:8188{}", path);
+    let response = if method == "POST" {
+        client.post(&url).json(&body.ok_or("Falta el contenido")?).send().await
+    } else if method == "GET" {
+        client.get(&url).send().await
+    } else {
+        return Err("Método no permitido".into());
+    }.map_err(|e| format!("No se puede conectar con ComfyUI: {e}"))?;
+    let status = response.status();
+    let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() { return Err(format!("ComfyUI HTTP {status}: {value}")); }
+    Ok(value)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().manage(DownloadManager::new()).invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model,control_download,remove_model]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");
+    tauri::Builder::default().manage(DownloadManager::new()).invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model,control_download,remove_model,comfy_request]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");
 }
