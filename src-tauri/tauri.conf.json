@@ -10,20 +10,30 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{
-      "title": "Navagart AI Studio",
-      "width": 1440,
-      "height": 900,
-      "minWidth": 1000,
-      "minHeight": 700,
-      "resizable": true,
-      "fullscreen": false
-    }],
-    "security": { "csp": null }
+    "windows": [
+      {
+        "title": "Navagart AI Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "shortDescription": "AI image and video creation studio",
     "longDescription": "Navagart AI Studio is a Windows desktop workspace for AI image and video generation."
   }
