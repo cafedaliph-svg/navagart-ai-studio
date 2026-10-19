@@ -134,7 +134,23 @@ async fn comfy_request(path: String, method: String, body: Option<serde_json::Va
     Ok(value)
 }
 
+#[tauri::command]
+async fn comfy_image(filename: String, subfolder: String, kind: String) -> Result<String, String> {
+    use base64::Engine;
+    let client = reqwest::Client::new();
+    let response = client.get("http://127.0.0.1:8188/view")
+        .query(&[("filename", filename.as_str()), ("subfolder", subfolder.as_str()), ("type", kind.as_str())])
+        .send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("No se pudo cargar la imagen: HTTP {}", response.status()));
+    }
+    let mime = response.headers().get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok()).unwrap_or("image/png").to_string();
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    Ok(format!("data:{};base64,{}", mime, base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().manage(DownloadManager::new()).invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model,control_download,remove_model,comfy_request]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");
+    tauri::Builder::default().manage(DownloadManager::new()).invoke_handler(tauri::generate_handler![engine_status,detect_hardware,install_ai_engine,start_ai_engine,list_models,install_model,control_download,remove_model,comfy_request,comfy_image]).run(tauri::generate_context!()).expect("error while running Navagart AI Studio");
 }
